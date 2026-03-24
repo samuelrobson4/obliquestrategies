@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oblique Strategies</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@200;300;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; cursor: none; background: #5a7d8e; }
+  canvas { position: fixed; inset: 0; }
+  #cursor {
+    position: fixed; width: 5px; height: 5px;
+    background: rgba(255,255,255,0.7); border-radius: 50%;
+    pointer-events: none; transform: translate(-50%,-50%); z-index: 9999;
+  }
+  #credit {
+    position: fixed; bottom: 20px; right: 24px;
+    font-family: 'DM Sans', sans-serif; font-weight: 200;
+    font-size: 8px; letter-spacing: 0.2em; color: rgba(255,255,255,0.25);
+    text-transform: uppercase; pointer-events: none; z-index: 999;
+  }
+  #randomize {
+    position: fixed; bottom: 18px; left: 24px;
+    width: 28px; height: 28px;
+    cursor: pointer; z-index: 999;
+    opacity: 0.35;
+    transition: opacity 0.2s ease;
+    background: none; border: none; padding: 0;
+  }
+  #randomize:hover { opacity: 0.75; }
+  #randomize svg { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="randomize" title="New strategy">
+  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- shuffle icon -->
+    <polyline points="16 3 21 3 21 8" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="4" y1="20" x2="21" y2="3" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+    <polyline points="21 16 21 21 16 21" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="15" y1="15" x2="21" y2="21" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="4" y1="4" x2="9" y2="9" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+  </svg>
+</button>
+<div id="cursor"></div>
+<div id="credit">Oblique Strategies — Eno &amp; Schmidt</div>
+<script>
+const STRATEGIES = [
+  "Abandon normal instruments","Accept advice","A line has two sides",
+  "Are there sections? Consider transitions","Ask your body",
+  "Be dirty","Be extravagant","Breathe more deeply","Bridges — build — burn",
+  "Change nothing and continue with immaculate consistency",
+  "Consult other sources — promising — unpromising","Courage!",
+  "Cut a vital connection","Decorate, decorate","Disconnect from desire",
+  "Discover the recipes you are using and abandon them",
+  "Do nothing for as long as possible","Don't be frightened of clichés",
+  "Don't break the silence","Emphasize the flaws",
+  "Faced with a choice, do both","Fill every beat","Ghost echoes",
+  "Give way to your worst impulse","Honour thy error as a hidden intention",
+  "How would you have done it?","Idiot glee",
+  "Imagine the music as a solid object","Into the impossible",
+  "Is it finished?","Is there something missing?","Just carry on",
+  "Listen to the quiet voice","Look at a very small object, look at its centre",
+  "Mechanicalize something idiosyncratic","Mute and continue",
+  "Nothing is a real problem",
+  "Once the search is in progress, something will be found",
+  "Only one element of each kind","Put in earplugs",
+  "Remove specifics and convert to ambiguities",
+  "Repetition is a form of change","Reverse","Simple subtraction",
+  "Slow preparation, fast execution",
+  "State the problem in words as clearly as possible",
+  "The most important thing is the thing most easily forgotten",
+  "Think of the radio","Tidy up","Turn it upside down","Use an old idea",
+  "Use fewer notes","Water","What are you really thinking about just now?",
+  "What is the reality of the situation?",
+  "What mistakes did you make last time?","Work at a different speed",
+  "You can only make one dot at a time","Your mistake was a hidden intention",
+];
+const canvas   = document.getElementById('c');
+const ctx      = canvas.getContext('2d');
+const cursorEl = document.getElementById('cursor');
+let W, H;
+let wallCanvas  = null;
+let grainCanvas = null;
+let grainOffset = { x: 0, y: 0 };
+// ─── Build background ─────────────────────────────────────────────────────────────────────────────────
+function buildWall() {
+  return new Promise(resolve => {
+    // Two-pass: slow large blobs (caustics) + mid-frequency ripple
+    const svgStr = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <defs>
+        <filter id="water" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+          <!-- Large soft caustic blobs — the key water look -->
+          <feTurbulence type="fractalNoise" baseFrequency="0.004 0.003" numOctaves="4" seed="7" result="blob"/>
+          <feColorMatrix type="saturate" values="0.25" in="blob" result="blobS"/>
+          <feComponentTransfer in="blobS" result="blobL">
+            <feFuncR type="linear" slope="0.22" intercept="0.38"/>
+            <feFuncG type="linear" slope="0.30" intercept="0.48"/>
+            <feFuncB type="linear" slope="0.38" intercept="0.54"/>
+          </feComponentTransfer>
+          <!-- Mid-frequency layer — adds secondary cloud depth -->
+          <feTurbulence type="fractalNoise" baseFrequency="0.018 0.013" numOctaves="5" seed="31" result="mid"/>
+          <feColorMatrix type="saturate" values="0.18" in="mid" result="midS"/>
+          <feComponentTransfer in="midS" result="midL">
+            <feFuncR type="linear" slope="0.10" intercept="0.00"/>
+            <feFuncG type="linear" slope="0.14" intercept="0.00"/>
+            <feFuncB type="linear" slope="0.18" intercept="0.00"/>
+          </feComponentTransfer>
+          <!-- Blend: caustics + ripple -->
+          <feBlend in="blobL" in2="midL" mode="screen" result="combined"/>
+          <!-- Lift and tint toward the reference blue -->
+          <feComponentTransfer in="combined">
+            <feFuncR type="linear" slope="0.88" intercept="0.05"/>
+            <feFuncG type="linear" slope="0.94" intercept="0.06"/>
+            <feFuncB type="linear" slope="1.00" intercept="0.08"/>
+          </feComponentTransfer>
+        </filter>
+      </defs>
+      <rect width="${W}" height="${H}" filter="url(#water)"/>
+    </svg>`;
+    const blob = new Blob([svgStr], { type: 'image/svg+xml' });
+    const url  = URL.createObjectURL(blob);
+    const img  = new Image();
+    img.onload = () => {
+      wallCanvas = document.createElement('canvas');
+      wallCanvas.width = W; wallCanvas.height = H;
+      const wc = wallCanvas.getContext('2d');
+      // Base — deep water blue
+      wc.fillStyle = '#4a7a8c';
+      wc.fillRect(0, 0, W, H);
+      // Caustic layer from SVG
+      wc.globalCompositeOperation = 'screen';
+      wc.globalAlpha = 0.85;
+      wc.drawImage(img, 0, 0);
+      wc.globalCompositeOperation = 'source-over';
+      wc.globalAlpha = 1;
+      // Soft overall tint — pull toward the hazy cyan of the reference
+      wc.fillStyle = 'rgba(110,175,195,0.18)';
+      wc.fillRect(0, 0, W, H);
+      // A few luminous bloom patches — like sunlight pooling on water
+      const patches = 4 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < patches; i++) {
+        const px = Math.random() * W;
+        const py = Math.random() * H;
+        const pr = H * (0.15 + Math.random() * 0.28);
+        const pa = 0.06 + Math.random() * 0.10;
+        const pg = wc.createRadialGradient(px, py, 0, px, py, pr);
+        pg.addColorStop(0,   `rgba(195,230,242,${pa})`);
+        pg.addColorStop(0.5, `rgba(160,210,228,${pa * 0.4})`);
+        pg.addColorStop(1,   'rgba(130,190,215,0)');
+        wc.fillStyle = pg;
+        wc.fillRect(0, 0, W, H);
+      }
+      // Vignette — slightly heavier to anchor it
+      const vg = wc.createRadialGradient(W*0.5, H*0.45, H*0.05, W*0.5, H*0.5, H*0.82);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(2,10,18,0.50)');
+      wc.fillStyle = vg;
+      wc.fillRect(0, 0, W, H);
+      URL.revokeObjectURL(url);
+      resolve();
+    };
+    img.onerror = () => {
+      wallCanvas = document.createElement('canvas');
+      wallCanvas.width = W; wallCanvas.height = H;
+      wallCanvas.getContext('2d').fillStyle = '#4a7a8c';
+      wallCanvas.getContext('2d').fillRect(0, 0, W, H);
+      resolve();
+    };
+    img.src = url;
+  });
+}
+// ─── Grain ───────────────────────────────────────────────────────────────────────────────────
+function buildGrain() {
+  grainCanvas = document.createElement('canvas');
+  grainCanvas.width = grainCanvas.height = 512;
+}
+function refreshGrain() {
+  const gc = grainCanvas.getContext('2d');
+  const id = gc.createImageData(512, 512);
+  const d  = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = (Math.random() * 255) | 0;
+    d[i]   = v;
+    d[i+1] = v + ((Math.random() * 10 - 2) | 0);
+    d[i+2] = v + ((Math.random() * 18 - 4) | 0);
+    d[i+3] = 28 + (Math.random() * 28) | 0;
+  }
+  gc.putImageData(id, 0, 0);
+  grainOffset.x = (Math.random() * 512) | 0;
+  grainOffset.y = (Math.random() * 512) | 0;
+}
+// ─── Grainy text renderer ─────────────────────────────────────────────────────────────────────
+const grainLetterCache = new Map();
+const BASE_FONT = 28;
+function getGrainLetter(ch, fontSize, opacity) {
+  return { ch, fontSize, opacity };
+}
+function drawGrainLetter(ch, screenX, screenY, fontSize, wallDist, masterAlpha) {
+  if (masterAlpha < 0.01) return;
+  const pad = 4;
+  const cw  = (fontSize * 1.4 + pad * 2) | 0;
+  const ch2 = (fontSize * 1.8 + pad * 2) | 0;
+  const mask = document.createElement('canvas');
+  mask.width = cw; mask.height = ch2;
+  const mx = mask.getContext('2d');
+  mx.font = `600 ${fontSize}px 'DM Sans', sans-serif`;
+  mx.fillStyle = '#fff';
+  mx.textBaseline = 'alphabetic';
+  mx.fillText(ch === ' ' ? '\u00A0' : ch, pad, fontSize * 1.05 + pad * 0.2);
+  const baseOpacity = (0.45 + 0.50 * wallDist) * masterAlpha;
+  const grainOff = document.createElement('canvas');
+  grainOff.width = cw; grainOff.height = ch2;
+  const go = grainOff.getContext('2d');
+  go.fillStyle = `rgba(255,255,255,${0.72 - wallDist * 0.08})`;
+  go.fillRect(0, 0, cw, ch2);
+  go.globalCompositeOperation = 'overlay';
+  go.globalAlpha = 0.72;
+  const gx0 = -(grainOffset.x % 512);
+  const gy0 = -(grainOffset.y % 512);
+  for (let gx = gx0; gx < cw; gx += 512)
+    for (let gy = gy0; gy < ch2; gy += 512)
+      go.drawImage(grainCanvas, gx, gy);
+  go.globalCompositeOperation = 'source-over';
+  go.globalAlpha = 1;
+  go.globalCompositeOperation = 'destination-in';
+  go.drawImage(mask, 0, 0);
+  go.globalCompositeOperation = 'source-over';
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = baseOpacity;
+  ctx.drawImage(grainOff, screenX - pad, screenY - fontSize * 1.05 - pad * 0.2, cw, ch2);
+  ctx.restore();
+}
+// ─── Mouse ──────────────────────────────────────────────────────────────────────────────────
+const mouse = { x: -9999, y: -9999 };
+document.addEventListener('mousemove', e => {
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  cursorEl.style.left = e.clientX + 'px';
+  cursorEl.style.top  = e.clientY + 'px';
+});
+document.addEventListener('mouseleave', () => { mouse.x = -9999; mouse.y = -9999; });
+// ─── Pool ───────────────────────────────────────────────────────────────────────────────────
+function shuffle(a) {
+  const b = [...a];
+  for (let i = b.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [b[i], b[j]] = [b[j], b[i]];
+  }
+  return b;
+}
+let pool = shuffle([...STRATEGIES]), pidx = 0;
+function nextText() {
+  if (pidx >= pool.length) { pool = shuffle([...STRATEGIES]); pidx = 0; }
+  return pool[pidx++];
+}
+const PERSP = 520;
+function zScale(z) { return PERSP / (PERSP - z); }
+// ─── Letter ──────────────────────────────────────────────────────────────────────────────────
+class Letter {
+  constructor(ch) {
+    this.ch = ch;
+    this.x = 0; this.y = 0; this.z = 0;
+    this.dx = 0; this.dy = 0;
+    this.vx = 0; this.vy = 0;
+    this.alpha = 0;
+  }
+  applyForce(fx, fy) { this.vx += fx; this.vy += fy; }
+  tick() {
+    this.vx += -this.dx * 0.13; this.vy += -this.dy * 0.13;
+    this.vx *= 0.77;             this.vy *= 0.77;
+    this.dx += this.vx;          this.dy += this.vy;
+    const sx = this.x + this.dx, sy = this.y + this.dy;
+    const ex = mouse.x - sx, ey = mouse.y - sy;
+    const d  = Math.sqrt(ex * ex + ey * ey);
+    if (d < 68 && d > 0) {
+      const f = (1 - d / 68) * 7;
+      this.applyForce((-ex / d) * f, (-ey / d) * f);
+    }
+  }
+  draw(masterAlpha) {
+    const s        = zScale(this.z);
+    const sx       = this.x + this.dx;
+    const sy       = this.y + this.dy;
+    const a        = this.alpha * masterAlpha;
+    if (a < 0.015) return;
+    const wallDist = Math.max(0, Math.min(1, (this.z + 220) / 440));
+    const fontSize = Math.max(7, (BASE_FONT * s) | 0);
+    drawGrainLetter(this.ch, sx, sy, fontSize, 1 - wallDist, a);
+  }
+}
+// ─── Snake ──────────────────────────────────────────────────────────────────────────────────
+let snake = null;
+class Snake {
+  constructor(text) {
+    this.fromLeft  = Math.random() > 0.5;
+    this.speed     = 0.22 + Math.random() * 0.15;
+    this.baseY     = H * 0.10 + Math.random() * H * 0.80;
+    this.ywAmp     = 12 + Math.random() * 22;
+    this.ywLen     = 0;
+    this.ywSpd     = 0.012 + Math.random() * 0.013;
+    this.zwAmp     = 90  + Math.random() * 130;
+    this.zwLen     = 0.09 + Math.random() * 0.14;
+    this.zwSpd     = 0.009 + Math.random() * 0.012;
+    this.zwPhase   = Math.random() * Math.PI * 2;
+    this.zBase     = (Math.random() - 0.5) * 55;
+    this.phase     = Math.random() * Math.PI * 2;
+    this.masterAlpha = 0;
+    this._fadeDir  = 1;
+    this.alive     = true;
+    this.chars  = text.split('').map(ch => ch === ' ' ? '\u00A0' : ch);
+    this.nodes  = this.chars.map(ch => new Letter(ch));
+    this.widths = [];
+    this.totalW = 0;
+    ctx.font = `600 ${BASE_FONT}px 'DM Sans', sans-serif`;
+    this.chars.forEach((ch, i) => {
+      const w = ctx.measureText(ch).width;
+      this.widths[i] = w;
+      this.totalW   += w;
+    });
+    this.headX = this.fromLeft ? -(this.totalW + 80) : W + this.totalW + 80;
+    const cycles = 0.7 + Math.random() * 0.6;
+    this.ywLen = (Math.PI * 2 * cycles) / Math.max(1, this.chars.length);
+  }
+  update() {
+    this.phase   += this.ywSpd;
+    this.zwPhase += this.zwSpd;
+    this.headX   += this.fromLeft ? this.speed : -this.speed;
+    if (this._fadeDir === 1) this.masterAlpha = Math.min(1, this.masterAlpha + 0.009);
+    const full = W + this.totalW * 2 + 160;
+    const trav = this.fromLeft
+      ? (this.headX + this.totalW + 80) / full
+      : 1 - (this.headX - this.totalW - 80 + full) / full;
+    if (Math.min(1, Math.max(0, trav)) > 0.70) {
+      this._fadeDir = -1;
+      this.masterAlpha = Math.max(0, this.masterAlpha - 0.010);
+    }
+    if (this.masterAlpha <= 0 && this._fadeDir === -1) { this.alive = false; return; }
+    let cum = 0;
+    this.nodes.forEach((n, i) => {
+      const fi = this.fromLeft ? i : (this.nodes.length - 1 - i);
+      const lx = this.fromLeft ? this.headX + cum : this.headX - (this.totalW - cum);
+      const yp = this.phase - fi * this.ywLen;
+      const ly = this.baseY + Math.sin(yp) * this.ywAmp;
+      const zp = this.zwPhase - fi * this.zwLen;
+      const lz = this.zBase + Math.sin(zp) * this.zwAmp;
+      n.x = lx; n.y = ly; n.z = lz;
+      n.alpha += (1 - n.alpha) * 0.055;
+      n.tick();
+      cum += this.widths[i] * zScale(lz);
+    });
+  }
+  draw() {
+    this.nodes
+      .map((n, i) => ({ n, i }))
+      .sort((a, b) => a.n.z - b.n.z)
+      .forEach(({ n }) => n.draw(this.masterAlpha));
+  }
+}
+// ─── Main loop ──────────────────────────────────────────────────────────────────────────────
+let frame = 0;
+function loop() {
+  requestAnimationFrame(loop);
+  frame++;
+  ctx.drawImage(wallCanvas, 0, 0);
+  if (!snake) snake = new Snake(nextText());
+  snake.update();
+  if (snake.alive) snake.draw();
+  else snake = null;
+  if (frame % 2 === 0) refreshGrain();
+  const gx0 = -(grainOffset.x), gy0 = -(grainOffset.y);
+  ctx.save();
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = 0.48;
+  for (let gx = gx0; gx < W; gx += 512)
+    for (let gy = gy0; gy < H; gy += 512)
+      ctx.drawImage(grainCanvas, gx, gy);
+  ctx.restore();
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.globalAlpha = 0.22;
+  for (let gx = gx0; gx < W; gx += 512)
+    for (let gy = gy0; gy < H; gy += 512)
+      ctx.drawImage(grainCanvas, gx, gy);
+  ctx.restore();
+}
+// ─── Init ──────────────────────────────────────────────────────────────────────────────────
+async function init() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  await buildWall();
+  buildGrain();
+  refreshGrain();
+  loop();
+}
+window.addEventListener('resize', () => {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  buildWall();
+});
+document.getElementById('randomize').addEventListener('click', () => {
+  if (snake) { snake.alive = false; }
+});
+document.fonts.ready.then(init);
+</script>
+</body>
+</html>
